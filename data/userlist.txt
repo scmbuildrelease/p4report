@@ -1,0 +1,6 @@
+# Synthetic demonstration directory: name|email|p4_username
+Alex Example|alex@example.com|alex
+Blair Sample|blair@example.com|blair
+Casey Demo|casey@example.com|casey
+Drew Fiction|drew@example.com|drew
+Emery Placeholder|emery@example.com|emery
