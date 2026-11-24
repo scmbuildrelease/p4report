@@ -1,0 +1,10 @@
+# Development, test and lint tooling. Never needed by the report job.
+-r requirements.txt
+pytest==9.2.0
+pytest-cov==7.1.0
+coverage==7.17.5
+ruff==0.17.6
+mypy==2.4.1
+types-openpyxl==3.1.5.20261122
+PyYAML==6.0.4
+setuptools==84.2.1

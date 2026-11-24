@@ -1,41 +1,86 @@
-name: Weekly synthetic Perforce report
+name: p4report CI and weekly report
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   schedule:
+    # 17:00 UTC Monday = 09:00 PST / 10:00 PDT. Reports the previous complete week.
     - cron: "0 17 * * 1"
   workflow_dispatch:
     inputs:
       send_email:
-        description: Send email (requires configured SMTP secrets)
+        description: Send email (requires SMTP secrets and the REPORT_RECIPIENT variable)
         type: boolean
         required: false
         default: false
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  # Cancel superseded CI runs, but never interrupt a report that may be emailing.
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
 jobs:
-  report:
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
-      - name: Generate report
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install development dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pip install --no-deps -e .
+      - name: Ruff
+        run: ruff check .
+      - name: Mypy
+        run: mypy
+      - name: Pytest
+        run: python -m pytest
+
+  report:
+    needs: test
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install runtime dependencies only
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install --no-deps .
+      - name: Generate report and optionally email it
         env:
+          # Email stays off unless explicitly enabled: the manual checkbox, or the
+          # SEND_EMAIL repository variable for scheduled runs.
           SEND_EMAIL: ${{ (github.event_name == 'workflow_dispatch' && inputs.send_email) || (github.event_name == 'schedule' && vars.SEND_EMAIL == 'true') }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
-          REPORT_RECIPIENT: ${{ vars.REPORT_RECIPIENT || 'aaa@example.com' }}
-        run: python -m p4report --send-email
+          REPORT_RECIPIENT: ${{ vars.REPORT_RECIPIENT }}
+        run: python -m p4report --send-email --output-dir reports
       - name: Upload Excel report
+        # The workbook is written before any SMTP attempt, so upload it even if delivery failed.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: p4report-${{ github.run_id }}
           path: reports/*.xlsx
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
